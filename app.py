@@ -1,15 +1,31 @@
+import json
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+import redis
 
+# --- 1. REDIS BAĞLANTISI ---
+try:
+    redis_client = redis.Redis.from_url(
+        'rediss://default:gQAAAAAAAURNAAIgcDEzMGNiMWQ4MzYwOTE0Y2E5OGE0ZjFmZjFhM2I2YWQ1Yg@neutral-unicorn-83021.upstash.io:6379',
+        ssl_cert_reqs="none"
+    )
+    redis_client.ping()
+    print("Redis Bağlantısı Başarılı! 🚀 (Sistem roketlendi)")
+except Exception as e:
+    print("Redis Bağlantı Hatası:", e)
+
+# --- 2. FLASK VE VERİTABANI AYARLARI ---
 app = Flask(__name__)
 CORS(app)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///flexifit.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
 db = SQLAlchemy(app)
 
+# --- 3. VERİTABANI MODELİ ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     full_name = db.Column(db.String(100), nullable=False)
@@ -21,11 +37,13 @@ class User(db.Model):
 with app.app_context():
     db.create_all()
 
+# --- 4. ROTALAR (API ENDPOINT'LERİ) ---
+
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({"status": "success", "message": "FlexiFit API Canli Yayinda!"})
 
-# --- KAYIT OLMA ---
+# KAYIT OLMA
 @app.route('/auth/register', methods=['POST'])
 def register():
     data = request.get_json()
@@ -43,7 +61,7 @@ def register():
     db.session.commit()
     return jsonify({"status": "success", "message": "Kayit basarili!"}), 201
 
-# --- GİRİŞ YAPMA (YENİ!) ---
+# GİRİŞ YAPMA
 @app.route('/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
@@ -58,11 +76,50 @@ def login():
     
     return jsonify({"status": "error", "message": "Email veya sifre hatali!"}), 401
 
-# --- ŞAHİTLİK/DEBUG (YENİ!) ---
+# PROFİL GETİRME (REDIS CACHE DESTEKLİ!)
+@app.route('/api/profile/<email>', methods=['GET'])
+def get_profile(email):
+    # 1. Önce Redis'e (Önbelleğe) soruyoruz
+    try:
+        cached_data = redis_client.get(email)
+        if cached_data:
+            print("⚡ ŞOV ZAMANI: Veri veritabanı yorulmadan REDIS'ten (Önbellek) saniyesinde getirildi!")
+            return jsonify(json.loads(cached_data.decode('utf-8'))), 200
+    except Exception as e:
+        print("Redis okuma hatası:", e)
+
+    # 2. Redis'te yoksa SQLite Veritabanına gidiyoruz
+    user = User.query.filter_by(email=email).first()
+    
+    if user:
+        user_data = {
+            "name": user.full_name,
+            "email": user.email,
+            "height": user.height,
+            "weight": user.weight
+        }
+        
+        # 3. Bulduğumuz bu veriyi 1 saatliğine Redis'e kaydediyoruz
+        try:
+            redis_client.setex(email, 3600, json.dumps(user_data))
+            print("🐢 NORMAL HIZ: Veri SQLite'dan geldi ve REDIS'e kopyalandı!")
+        except Exception as e:
+            print("Redis yazma hatası:", e)
+            
+        return jsonify(user_data), 200
+        
+    return jsonify({"message": "Kullanici bulunamadi"}), 404
+
+# ŞAHİTLİK/DEBUG
 @app.route('/debug/users', methods=['GET'])
 def list_users():
     users = User.query.all()
     return jsonify({"users": [{"id": u.id, "email": u.email, "name": u.full_name} for u in users]})
 
+import os
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Render'ın bize vereceği dinamik portu yakalıyoruz, yoksa 5000 kullanıyoruz
+    port = int(os.environ.get("PORT", 5000))
+    # host='0.0.0.0' kodu, uygulamanın dış dünyaya açılmasını sağlar
+    app.run(host='0.0.0.0', port=port, debug=True)
