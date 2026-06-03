@@ -1,18 +1,18 @@
-# 1. İşletim sistemi ve Python sürümünü seçiyoruz
-FROM python:3.10-slim
+# Python'un hafif bir versiyonunu kullanıyoruz
+FROM python:3.9-slim
 
-# 2. Konteyner içinde çalışacağımız klasörü belirliyoruz
+# Konteyner içindeki çalışma dizinini belirliyoruz
 WORKDIR /app
 
-# 3. Kütüphane listemizi kopyalayıp kuruyoruz
-COPY requirements.txt .
+# Önce requirements.txt dosyasını kopyalayıp kütüphaneleri kuruyoruz (Cache avantajı için)
+COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Geri kalan tüm kodlarımızı (app.py vb.) kopyalıyoruz
+# Şimdi tüm proje dosyalarını kopyalıyoruz
 COPY . .
 
-# 5. Dışarıya açacağımız portu (Flask'ın çalıştığı port) belirtiyoruz
+# Flask uygulamasının çalışacağı portu açıyoruz (Render genelde portu otomatik ayarlar ama standart 5000'dir)
 EXPOSE 5000
 
-# 6. Konteyner çalıştırıldığında verilecek komut
+# Uygulamayı başlatma komutu (app.py dosyanı çalıştırır)
 CMD ["python", "app.py"]
